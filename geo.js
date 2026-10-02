@@ -1,0 +1,20 @@
+export const DEG=Math.PI/180;
+export function distance(a,b){const dlat=(b.lat-a.lat)*DEG,dlon=(b.lon-a.lon)*DEG;const q=Math.sin(dlat/2)**2+Math.cos(a.lat*DEG)*Math.cos(b.lat*DEG)*Math.sin(dlon/2)**2;return 6371008.8*2*Math.atan2(Math.sqrt(q),Math.sqrt(Math.max(0,1-q)))}
+export function bearing(a,b){const d=(b.lon-a.lon)*DEG,la=a.lat*DEG,lb=b.lat*DEG;return (Math.atan2(Math.sin(d)*Math.cos(lb),Math.cos(la)*Math.sin(lb)-Math.sin(la)*Math.cos(lb)*Math.cos(d))/DEG+360)%360}
+function ecef(lon,lat,alt){let p=lat*DEG,l=lon*DEG,n=6378137/Math.sqrt(1-.00669437999014*Math.sin(p)**2);return[(n+alt)*Math.cos(p)*Math.cos(l),(n+alt)*Math.cos(p)*Math.sin(l),(n*(1-.00669437999014)+alt)*Math.sin(p)]}
+export function worldPosition(coord,station,mode,ground){const altitude=mode==='absolute'?(coord[2]||0):ground+(mode==='relativeToGround'?(coord[2]||0):0);const a=ecef(station.lon,station.lat,station.alt),b=ecef(coord[0],coord[1],altitude),d=b.map((x,i)=>x-a[i]),p=station.lat*DEG,l=station.lon*DEG;return[-Math.sin(l)*d[0]+Math.cos(l)*d[1],Math.cos(p)*Math.cos(l)*d[0]+Math.cos(p)*Math.sin(l)*d[1]+Math.sin(p)*d[2],Math.sin(p)*Math.cos(l)*d[0]+Math.sin(p)*Math.sin(l)*d[1]-Math.cos(p)*d[2]]}
+export function densify(coords,step=25){const result=[];for(let i=0;i<coords.length;i++){if(i){const a=coords[i-1],b=coords[i],n=Math.min(500,Math.ceil(distance({lon:a[0],lat:a[1]},{lon:b[0],lat:b[1]})/step));for(let j=1;j<n;j++)result.push(a.map((v,k)=>v+(b[k]-v)*j/n))}result.push(coords[i])}return result}
+// Clip in camera coordinates against near, left, right, top and bottom planes.
+export function clipSegment(a,b,tanX,tanY){let lo=0,hi=1;const planes=[p=>-p[2]-.2,p=>p[0]-p[2]*tanX,p=>-p[0]-p[2]*tanX,p=>p[1]-p[2]*tanY,p=>-p[1]-p[2]*tanY];for(const f of planes){let fa=f(a),fb=f(b);if(fa<0&&fb<0)return null;if(fa<0)lo=Math.max(lo,fa/(fa-fb));if(fb<0)hi=Math.min(hi,fa/(fa-fb));if(lo>hi)return null}const v=t=>a.map((x,i)=>x+(b[i]-x)*t);return[v(lo),v(hi)]}
+export function validateState(s){if(!s||!Array.isArray(s.layers)||s.layers.length>40||!s.calibrations||typeof s.calibrations!=='object'||Array.isArray(s.calibrations))throw Error('Respaldo de Railview no válido.');let count=0;const coord=c=>{if(!Array.isArray(c)||c.length<2||!Number.isFinite(c[0])||!Number.isFinite(c[1])||Math.abs(c[0])>180||Math.abs(c[1])>90||(c[2]!=null&&!Number.isFinite(c[2])))throw Error('Coordenadas inválidas');if(++count>120000)throw Error('Máximo 120 000 vértices por proyecto')};for(const l of s.layers){if(typeof l.id!=='string'||typeof l.name!=='string'||!/^#[0-9a-f]{6}$/i.test(l.color)||!Number.isFinite(l.opacity)||l.opacity<0||l.opacity>1||!Array.isArray(l.features))throw Error('Capa inválida');for(const f of l.features){if(!['Point','LineString','Polygon','GroundOverlay'].includes(f.type)||!['absolute','relativeToGround','clampToGround'].includes(f.altitudeMode))throw Error('Geometría no compatible');if(f.type==='Point')coord(f.coordinates);else if(f.type==='Polygon')f.coordinates.forEach(r=>r.forEach(coord));else f.coordinates.forEach(coord);if(f.type==='GroundOverlay'&&!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(f.image))throw Error('Imagen de capa inválida')}}for(const c of Object.values(s.calibrations)){if(!c||!Number.isFinite(c.yaw)||Math.abs(c.yaw)>180||!Number.isFinite(c.pitch)||Math.abs(c.pitch)>45||!Number.isFinite(c.ground)||Math.abs(c.ground)>12000)throw Error('Alineación inválida')}return s}
+
+// Sutherland–Hodgman clipping before perspective division prevents fills behind
+// the camera from covering the image. Clip each ring; SVG evenodd retains holes.
+export function clipPolygon(vertices,tanX,tanY){
+ let out=vertices;
+ for(const plane of [p=>-p[2]-.2,p=>p[0]-p[2]*tanX,p=>-p[0]-p[2]*tanX,p=>p[1]-p[2]*tanY,p=>-p[1]-p[2]*tanY]){
+  const input=out;out=[];if(!input.length)break;
+  let a=input[input.length-1],fa=plane(a);
+  for(const b of input){const fb=plane(b);if((fa>=0)!==(fb>=0)){const t=fa/(fa-fb);out.push(a.map((v,i)=>v+(b[i]-v)*t))}if(fb>=0)out.push(b);a=b;fa=fb}
+ }return out;
+}
